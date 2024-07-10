@@ -1,0 +1,158 @@
+// تحديد عدد الشموع المستخدمة للبحث عن أعلى قمة وأدنى قاع وعدد الشموع للأوامر المعلقة
+#define BARS_LOOKBACK 50
+#define MAX_ORDER_AGE_BARS 50
+#define MAX_PENDING_ORDERS 1
+
+string higherHighArrowName = "";
+string lowerLowArrowName = "";
+double lastKnownHigherHigh = 0;
+double lastKnownLowerLow = 0;
+
+double FindLastHigherHigh(int barsLookback, int &index) {
+    double highestHigh = High[1]; // بدء من الشمعة الثانية (High[1])
+    index = 1;
+
+    for (int i = 2; i <= barsLookback; i++) { // حلقة عبر الشموع المطلوبة
+        double high = High[i];
+        if (high > highestHigh) {
+            highestHigh = high;
+            index = i;
+        }
+    }
+
+    return highestHigh;
+}
+
+double FindLastLowerLow(int barsLookback, int &index) {
+    double lowestLow = Low[1]; // بدء من الشمعة الثانية (Low[1])
+    index = 1;
+    
+    for (int i = 2; i <= barsLookback; i++) { // حلقة عبر الشموع المطلوبة
+        double low = Low[i];
+        if (low < lowestLow) {
+            lowestLow = low;
+            index = i;
+        }
+    }
+
+    return lowestLow;
+}
+
+void DrawArrow(string &currentArrowName, string namePrefix, int timeIndex, double price, color arrowColor) {
+    // حذف السهم القديم إذا كان موجودًا
+    if (currentArrowName != "") {
+        ObjectDelete(currentArrowName);
+    }
+
+    // إنشاء اسم جديد للسهم
+    string newName = namePrefix + "_" + TimeToString(Time[timeIndex], TIME_DATE|TIME_MINUTES);
+    currentArrowName = newName;
+
+    // إنشاء السهم الجديد
+    ObjectCreate(0, newName, OBJ_ARROW, 0, Time[timeIndex], price);
+    ObjectSetInteger(0, newName, OBJPROP_COLOR, arrowColor);
+    ObjectSetInteger(0, newName, OBJPROP_WIDTH, 2);
+    ObjectSetInteger(0, newName, OBJPROP_ARROWCODE, 233); // Arrow code 233 is a suitable arrow style
+}
+
+void PlaceBuyStopOrder(double price, double lotSize, double slippage, double stopLoss, double takeProfit) {
+    int ticket = OrderSend(Symbol(), OP_BUYSTOP, lotSize, price, slippage, price - stopLoss, price + takeProfit, "Buy Stop Order", 0, 0, Blue);
+    if (ticket < 0) {
+        Print("Error placing buy stop order: ", GetLastError());
+    } else {
+        Print("Buy stop order placed successfully. Ticket: ", ticket);
+    }
+}
+
+void PlaceSellStopOrder(double price, double lotSize, double slippage, double stopLoss, double takeProfit) {
+    int ticket = OrderSend(Symbol(), OP_SELLSTOP, lotSize, price, slippage, price + stopLoss, price - takeProfit, "Sell Stop Order", 0, 0, Red);
+    if (ticket < 0) {
+        Print("Error placing sell stop order: ", GetLastError());
+    } else {
+        Print("Sell stop order placed successfully. Ticket: ", ticket);
+    }
+}
+
+bool AreThereOpenTrades() {
+    for (int i = OrdersTotal() - 1; i >= 0; i--) {
+        if (OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
+            if (OrderType() == OP_BUY || OrderType() == OP_SELL) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+void DeleteOldPendingOrders(int maxOrderAgeBars) {
+    int currentTime = Time[0]; // الوقت الحالي
+
+    for (int i = OrdersTotal() - 1; i >= 0; i--) {
+        if (OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
+            if (OrderType() == OP_BUYSTOP || OrderType() == OP_SELLSTOP) {
+                int orderOpenTime = OrderOpenTime();
+                int orderAgeBars = (currentTime - orderOpenTime) / PeriodSeconds(); // حساب عمر الأمر بالشمعات
+                if (orderAgeBars > maxOrderAgeBars) {
+                    OrderDelete(OrderTicket());
+                    Print("Deleted old pending order. Ticket: ", OrderTicket());
+                }
+            }
+        }
+    }
+}
+
+int CountPendingOrders(int orderType) {
+    int count = 0;
+    for (int i = OrdersTotal() - 1; i >= 0; i--) {
+        if (OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
+            if (OrderType() == orderType) {
+                count++;
+            }
+        }
+    }
+    return count;
+}
+
+void OnTick() {
+    // المعلمات
+    double lotSize = 0.1; // حجم اللوت المثال
+    double slippage = 3;  // الانزلاق السعري المثال
+    double stopLoss = 180 * Point; // وقف الخسارة المثال
+    double takeProfit = 60 * Point; // جني الأرباح المثال
+
+    // حذف الأوامر المعلقة القديمة
+    DeleteOldPendingOrders(MAX_ORDER_AGE_BARS);
+
+    // العثور على آخر قمة وأخر قاع
+    int higherHighIndex, lowerLowIndex;
+    double currentHigherHigh = FindLastHigherHigh(BARS_LOOKBACK, higherHighIndex);
+    double currentLowerLow = FindLastLowerLow(BARS_LOOKBACK, lowerLowIndex);
+
+    // التحقق من وجود قمة جديدة
+    if (currentHigherHigh != lastKnownHigherHigh) {
+        // رسم السهم الجديد
+        DrawArrow(higherHighArrowName, "LastHigherHighArrow", higherHighIndex, currentHigherHigh, Blue);
+
+        // إذا لم تكن هناك صفقات مفتوحة ولا يوجد أكثر من أمرين معلقين للشراء، ضع أمر جديد
+        if (!AreThereOpenTrades() && CountPendingOrders(OP_BUYSTOP) < MAX_PENDING_ORDERS) {
+            PlaceBuyStopOrder(currentHigherHigh, lotSize, slippage, stopLoss, takeProfit);
+        }
+
+        // تحديث القمة المعروفة الأخيرة
+        lastKnownHigherHigh = currentHigherHigh;
+    }
+
+    // التحقق من وجود قاع جديد
+    if (currentLowerLow != lastKnownLowerLow) {
+        // رسم السهم الجديد
+        DrawArrow(lowerLowArrowName, "LastLowerLowArrow", lowerLowIndex, currentLowerLow, Red);
+
+        // إذا لم تكن هناك صفقات مفتوحة ولا يوجد أكثر من أمرين معلقين للبيع، ضع أمر جديد
+        if (!AreThereOpenTrades() && CountPendingOrders(OP_SELLSTOP) < MAX_PENDING_ORDERS) {
+            PlaceSellStopOrder(currentLowerLow, lotSize, slippage, stopLoss, takeProfit);
+        }
+
+        // تحديث القاع المعروف الأخير
+        lastKnownLowerLow = currentLowerLow;
+    }
+}
