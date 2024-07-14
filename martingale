@@ -1,0 +1,107 @@
+//+------------------------------------------------------------------+
+//|                                                                  |
+//|                         martingale                               |
+//|                                                                  |
+//+------------------------------------------------------------------+
+
+
+input double start_lot = 0.01;
+double double_lot = start_lot;
+input double take_profit = 1000;
+input double stop_loss = 500;
+double MyPoint;
+
+
+//تحديد الوقت  الذي سوف يتوقف ويبداء فيه الاكسبيرت
+input double start_in_h = 5;
+input double stop_in_h = 20;
+
+
+int OnInit() {
+
+   if(Digits==4 || Digits<=2)
+      MyPoint=Point;
+   if(Digits==3 || Digits==5)
+      MyPoint=Point*10;
+   int ticketbid = OrderSend(Symbol(),OP_SELL,0.01,Bid,3,Bid + 2*MyPoint,Bid - 2*MyPoint,0,0,0,clrRed);
+   
+}
+
+double take_profit_s = Bid - take_profit*MyPoint;
+double stop_loss_s = Bid + stop_loss*MyPoint;
+double take_profit_b = Ask + take_profit*MyPoint;
+double stop_loss_b = Ask - stop_loss*MyPoint;
+
+double double_lot_in_order;
+
+// التحقق من نوع آخر أمر تم إغلاقه
+int LastClosedOrderType() {
+   int totalOrders__ = OrdersHistoryTotal();
+   if(totalOrders__ > 0) {
+      int lastOrder__ = OrdersHistoryTotal() - 1;
+      if(OrderSelect(lastOrder__, SELECT_BY_POS, MODE_HISTORY)) {
+         return OrderType();
+         return OrderProfit();
+
+      }
+   }
+   return -1; // لا يوجد أوامر مغلقة
+}
+
+
+//-------------------------------------------------------------------------------------------------------------------------
+
+
+void st() {
+
+   int totalOrders = OrdersHistoryTotal();
+
+// Print the lot size of the last order
+   if(totalOrders > 0) {
+      if(OrderSelect(totalOrders - 1, SELECT_BY_POS, MODE_HISTORY)) {
+         double O1 = OrderProfit();  //قراءة اخر ربح/خسارة
+         double O1_L = OrderLots();  //قراءة اخر لوت 
+         Print("Lot size of the last order: ", O1);
+      }
+   }
+
+
+
+   if (O1 < 0 && O1_L == 1 && OrdersTotal()==0  ) {
+      double_lot = start_lot;
+   }
+   if(O1 > 0 && OrdersTotal()==0) {
+      double_lot = start_lot;
+      //طول ما الصفقة الاخيرة كسبانه رجع اللوت
+   }
+   if (O1 < 0 && OrdersTotal()==0 ) {
+      double_lot *= 2;
+      //طول ما الصفقة الاخيرة خسرانه دبل الجديد
+   }
+
+
+
+//if((TimeHour(TimeCurrent()) < stop_in_h))
+// if((TimeHour(TimeCurrent()) >= start_in_h))
+//     {
+
+   if(OrdersTotal()==0 && OrderProfit()<=0 && LastClosedOrderType() == OP_SELL) {
+      int ticket = OrderSend(Symbol(),OP_BUY,double_lot,Ask,3,Ask - 2*MyPoint,Ask + 2*MyPoint,"KARIM EA",0,0,clrRed);
+   }
+   else if(OrdersTotal()==0 && OrderProfit()>=0 && LastClosedOrderType() == OP_SELL) {
+      int tickett = OrderSend(Symbol(),OP_SELL,double_lot,Bid,3,Bid + 2*MyPoint,Bid - 2*MyPoint,"KARIM EA",0,0,clrRed);
+   }
+   else if(OrdersTotal()==0 && OrderProfit()>=0 && LastClosedOrderType() == OP_BUY) {
+      int tickettt = OrderSend(Symbol(),OP_BUY,double_lot,Ask,3,Ask - 2*MyPoint,Ask + 2*MyPoint,"KARIM EA",0,0,clrRed);
+   }
+   else if(OrdersTotal()==0 && OrderProfit()<=0 && LastClosedOrderType() == OP_BUY) {
+      int ticketttt = OrderSend(Symbol(),OP_SELL,double_lot,Bid,3,Bid + 2*MyPoint,Bid - 2*MyPoint,"KARIM EA",0,0,clrRed);
+   }
+   
+//}
+}
+
+
+void OnTick() {
+   st();
+}
