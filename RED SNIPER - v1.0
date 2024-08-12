@@ -1,0 +1,609 @@
+//+------------------------------------------------------------------+
+//|                                      Red Sniper                  |
+//|                                      Copyright 2024, x1.smc      |
+//|                                      https://www.x1smc.com       |
+//+------------------------------------------------------------------+
+
+
+input double start_in_h = 5;
+input double stop_in_h = 20;
+
+double START_BALANCE = 0;
+input bool graphic = true ;
+input bool summary_box = true;
+
+#property strict
+
+// إعدادات EA
+input double LotSize = 0.01;    // حجم اللوت الأساسي
+input int TakeProfit = 60;      // TP بالنقاط
+input int StopLoss = 120;       // SL بالنقاط
+
+double startingLot;
+double currentLot;
+double lossPoints;
+//+------------------------------------------------------------------+
+//|        دالة خطوط القناص                                          |
+//+------------------------------------------------------------------+
+
+double horizontalLine;
+datetime verticalLine;
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+bool IsNewBar()
+  {
+   datetime currentBarTime = Time[0];
+   datetime previousBarTime = Time[1];
+   return (currentBarTime != previousBarTime);
+  }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+
+double MaxDrawdown = 0; // تعريف متغير لتخزين قيمة أقصى سحب
+
+// دالة لحساب أقصى سحب
+double CalculateMaxDrawdown()
+  {
+   double maxDrawdown = 0;
+   double peak = AccountBalance();
+
+   for(int i = OrdersHistoryTotal() - 1; i >= 0; i--)
+     {
+      if(OrderSelect(i, SELECT_BY_POS, MODE_HISTORY))
+        {
+         if(OrderType() <= OP_SELL && OrderCloseTime() > 0)  // صفقة مغلقة
+           {
+            double equity = AccountEquity();
+            if(equity > peak)
+              {
+               peak = equity;
+              }
+            double drawdown = (peak - equity) / peak * 100;
+            if(drawdown > maxDrawdown)
+              {
+               maxDrawdown = drawdown;
+              }
+           }
+        }
+     }
+   return maxDrawdown;
+  }
+
+
+
+//+------------------------------------------------------------------+
+int OnInit()
+  {
+
+   START_BALANCE = AccountBalance();
+
+//-------------------------------------------------------------------+
+//                انشاء خطوط القناص
+//-------------------------------------------------------------------+
+
+   double currentClose = Close[0];
+   horizontalLine = ObjectCreate(0, "HorizontalLine", OBJ_HLINE, 0, Time[0], currentClose);
+   verticalLine = ObjectCreate(0, "VerticalLine", OBJ_VLINE, 0, Time[0], 0);
+
+
+   return(INIT_SUCCEEDED);
+  }
+
+
+//+------------------------------------------------------------------+
+//| Custom function to draw trade boxes                              |
+//+------------------------------------------------------------------+
+void DrawTradeBoxes()
+  {
+// الحصول على عدد الصفقات المغلقة
+   int totalTrades = OrdersHistoryTotal();
+
+   for(int i = 0; i < totalTrades; i++)
+     {
+      if(OrderSelect(i, SELECT_BY_POS, MODE_HISTORY))
+        {
+         // فقط الصفقات المغلقة
+         if(OrderType() <= OP_SELL && OrderCloseTime() > 0)
+           {
+            double entryPrice = OrderOpenPrice();
+            double exitPrice = OrderClosePrice();
+            datetime entryTime = OrderOpenTime();
+            datetime exitTime = OrderCloseTime();
+
+            // حساب المكسب أو الخسارة بالدولار
+            double profitLoss = OrderProfit();
+
+            // رسم المربع باستخدام المستطيل
+            string boxName = "TradeBox_" + IntegerToString(i);
+            ObjectCreate(0, boxName, OBJ_RECTANGLE, 0, entryTime, entryPrice, exitTime, exitPrice);
+            ObjectSetInteger(0, boxName, OBJPROP_COLOR, clrFireBrick); // لون حدود المربع
+            ObjectSetInteger(0, boxName, OBJPROP_STYLE, STYLE_DASH); // نمط الخط
+            ObjectSetInteger(0, boxName, OBJPROP_WIDTH, 1); // عرض الخط
+            ObjectSetInteger(0, boxName, OBJPROP_BACK, false); // خلفية الكائن
+
+
+
+            // تحديد موضع النص بناءً على نوع الصفقة
+            double textPrice;
+            if(OrderType() == OP_BUY)
+               textPrice = entryPrice + (exitPrice - entryPrice) * 0.2; // في الأعلى لصفقات الشراء
+            else
+               textPrice = entryPrice - (exitPrice - entryPrice) * 0.2; // في الأسفل لصفقات البيع
+
+            // إضافة النص
+            string infoText = "$" + DoubleToString(profitLoss, 2);
+            string textName = "TradeInfo_" + IntegerToString(i);
+            ObjectCreate(0, textName, OBJ_TEXT, 0, (entryTime + exitTime) / 2, textPrice);
+            ObjectSetString(0, textName, OBJPROP_TEXT, infoText);
+            ObjectSetInteger(0, textName, OBJPROP_COLOR, clrFireBrick);
+            ObjectSetInteger(0, textName, OBJPROP_FONTSIZE, 10);
+            ObjectSetInteger(0, textName, OBJPROP_CORNER, 0);
+            ObjectSetInteger(0, textName, OBJPROP_XDISTANCE, 0);
+            ObjectSetInteger(0, textName, OBJPROP_YDISTANCE, 0);
+            ObjectSetInteger(0, textName, OBJPROP_ANCHOR, ANCHOR_CENTER); // النص في المنتصف
+            ObjectSetInteger(0, textName, OBJPROP_BACK, true); // التأكد من أن مستطيل المعلومات في المقدمة
+
+           }
+        }
+     }
+  }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void G()
+  {
+
+
+//------------------------------------------------------------------------
+//                  middel box
+//------------------------------------------------------------------------
+
+// Create the rectangle using pixel coordinates
+   if(ObjectCreate(0, "MyPixelRectangle2", OBJ_RECTANGLE_LABEL, 0, 0, 0))
+     {
+      // Set the rectangle properties
+      ObjectSetInteger(0, "MyPixelRectangle2", OBJPROP_XSIZE, 400);        // Width in pixels
+      ObjectSetInteger(0, "MyPixelRectangle2", OBJPROP_YSIZE, 11000);        // Height in pixels
+      ObjectSetInteger(0, "MyPixelRectangle2", OBJPROP_CORNER, CORNER_LEFT_UPPER); // Anchor point
+      ObjectSetInteger(0, "MyPixelRectangle2", OBJPROP_XDISTANCE, 5);         // X-distance from anchor
+      ObjectSetInteger(0, "MyPixelRectangle2", OBJPROP_YDISTANCE, 85);         // Y-distance from anchor
+      ObjectSetInteger(0, "MyPixelRectangle2", OBJPROP_BGCOLOR, clrFireBrick);         // Color
+      ObjectSetInteger(0, "MyPixelRectangle2", OBJPROP_WIDTH, 2);              // Border width
+      ObjectSetInteger(0, "MyPixelRectangle2", OBJPROP_STYLE, STYLE_SOLID);    // Border style
+      ObjectSetInteger(0, "MyPixelRectangle2", OBJPROP_BACK, false); // التأكد من أن مستطيل المعلومات في المقدمة
+
+      Print("Pixel rectangle created successfully.");
+     }
+   else
+     {
+      Print("Failed to create pixel rectangle.");
+     }
+
+// جعل المستطيل في الطبقة الأمامية
+   ObjectSetInteger(0, "MyPixelRectangle2", OBJPROP_ZORDER, 1000);
+
+//------------------------------------------------------------------------
+//                  lower box
+//------------------------------------------------------------------------
+
+// Create the rectangle using pixel coordinates
+   if(ObjectCreate(0, "MyPixelRectangle", OBJ_RECTANGLE_LABEL, 0, 0, 0))
+     {
+      // Set the rectangle properties
+      ObjectSetInteger(0, "MyPixelRectangle", OBJPROP_XSIZE, 400);        // Width in pixels
+      ObjectSetInteger(0, "MyPixelRectangle", OBJPROP_YSIZE, 130);        // Height in pixels
+      ObjectSetInteger(0, "MyPixelRectangle", OBJPROP_CORNER, CORNER_LEFT_LOWER); // Anchor point
+      ObjectSetInteger(0, "MyPixelRectangle", OBJPROP_XDISTANCE, 5);         // X-distance from anchor
+      ObjectSetInteger(0, "MyPixelRectangle", OBJPROP_YDISTANCE, 135);         // Y-distance from anchor
+      ObjectSetInteger(0, "MyPixelRectangle", OBJPROP_BGCOLOR, clrFireBrick);         // Color
+      ObjectSetInteger(0, "MyPixelRectangle", OBJPROP_WIDTH, 2);              // Border width
+      ObjectSetInteger(0, "MyPixelRectangle", OBJPROP_STYLE, STYLE_SOLID);    // Border style
+      ObjectSetInteger(0, "MyPixelRectangle", OBJPROP_BACK, false); // التأكد من أن مستطيل المعلومات في المقدمة
+
+      Print("Pixel rectangle created successfully.");
+     }
+   else
+     {
+      Print("Failed to create pixel rectangle.");
+     }
+
+
+//------------------------------------------------------------------------
+//                  upper box
+//------------------------------------------------------------------------
+
+
+// Create the rectangle using pixel coordinates
+   if(ObjectCreate(0, "MyPixelRectangle1", OBJ_RECTANGLE_LABEL, 0, 0, 0))
+     {
+      // Set the rectangle properties
+      ObjectSetInteger(0, "MyPixelRectangle1", OBJPROP_XSIZE, 400);        // Width in pixels
+      ObjectSetInteger(0, "MyPixelRectangle1", OBJPROP_YSIZE, 80);        // Height in pixels
+      ObjectSetInteger(0, "MyPixelRectangle1", OBJPROP_CORNER, CORNER_LEFT_UPPER); // Anchor point
+      ObjectSetInteger(0, "MyPixelRectangle1", OBJPROP_XDISTANCE, 5);         // X-distance from anchor
+      ObjectSetInteger(0, "MyPixelRectangle1", OBJPROP_YDISTANCE, 5);         // Y-distance from anchor
+      ObjectSetInteger(0, "MyPixelRectangle1", OBJPROP_BGCOLOR, clrFireBrick);         // Color
+      ObjectSetInteger(0, "MyPixelRectangle1", OBJPROP_WIDTH, 2);              // Border width
+      ObjectSetInteger(0, "MyPixelRectangle1", OBJPROP_STYLE, STYLE_SOLID);    // Border style
+      ObjectSetInteger(0, "MyPixelRectangle1", OBJPROP_BACK, false); // التأكد من أن مستطيل المعلومات في المقدمة
+
+
+      Print("Pixel rectangle created successfully.");
+     }
+   else
+     {
+      Print("Failed to create pixel rectangle.");
+     }
+
+// جعل المستطيل في الطبقة الأمامية
+   ObjectSetInteger(0, "MyPixelRectangle1", OBJPROP_ZORDER, 1000);
+
+//-------------------------------------------------------------------------------
+
+// إنشاء النص لعرض المعلومات
+   string REDSNIPER = "RED SNIPER";
+
+// إنشاء الكائن النصي لعرض المعلومات
+   ObjectCreate(0, "InfoLabeS", OBJ_LABEL, 0, 0, 0);
+   ObjectSetInteger(0, "InfoLabeS", OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, "InfoLabeS", OBJPROP_XDISTANCE, 20); // المسافة من الحافة اليسرى
+   ObjectSetInteger(0, "InfoLabeS", OBJPROP_YDISTANCE, 15); // المسافة من الحافة السفلية
+   ObjectSetInteger(0, "InfoLabeS", OBJPROP_COLOR, clrWhite); // لون النص
+   ObjectSetString(0, "InfoLabeS", OBJPROP_TEXT, REDSNIPER); // النص المعروض
+   ObjectSetInteger(0, "InfoLabeS", OBJPROP_FONTSIZE, 35); // حجم الخط
+
+//---------------------------------------------------------
+// شيفرة لعرض السبريد في الجزء السفلي الأيسر
+//---------------------------------------------------------
+
+   double spread = (Ask - Bid) / Point /10; // حساب السبريد بالنقاط
+
+// حذف الرسالة السابقة
+   ObjectDelete("InfoLabel");
+
+// إنشاء النص لعرض المعلومات
+   string infoText = "Spread: " + DoubleToString(spread, 1) ;
+
+// إنشاء الكائن النصي لعرض المعلومات
+   ObjectCreate(0, "InfoLabel", OBJ_LABEL, 0, 0, 0);
+   ObjectSetInteger(0, "InfoLabel", OBJPROP_CORNER, CORNER_LEFT_LOWER);
+   ObjectSetInteger(0, "InfoLabel", OBJPROP_XDISTANCE, 10); // المسافة من الحافة اليسرى
+   ObjectSetInteger(0, "InfoLabel", OBJPROP_YDISTANCE, 35); // المسافة من الحافة السفلية
+   ObjectSetInteger(0, "InfoLabel", OBJPROP_COLOR, clrWhite); // لون النص
+   ObjectSetString(0, "InfoLabel", OBJPROP_TEXT, infoText); // النص المعروض
+   ObjectSetInteger(0, "InfoLabel", OBJPROP_FONTSIZE, 12); // حجم الخط
+
+//--------------------------------------------------------------------------------------
+   double balance = AccountBalance(); // الحصول على رصيد الحساب
+
+// حذف الرسالة السابقة
+   ObjectDelete("InfoLabe2");
+
+// إنشاء النص لعرض المعلومات
+   string infoText1 = "Balance: " + DoubleToString(balance, 1)  ;
+
+// إنشاء الكائن النصي لعرض المعلومات
+   ObjectCreate(0, "InfoLabe2", OBJ_LABEL, 0, 0, 0);
+   ObjectSetInteger(0, "InfoLabe2", OBJPROP_CORNER, CORNER_LEFT_LOWER);
+   ObjectSetInteger(0, "InfoLabe2", OBJPROP_XDISTANCE, 10); // المسافة من الحافة اليسرى
+   ObjectSetInteger(0, "InfoLabe2", OBJPROP_YDISTANCE, 125); // المسافة من الحافة السفلية
+   ObjectSetInteger(0, "InfoLabe2", OBJPROP_COLOR, clrWhite); // لون النص
+   ObjectSetString(0, "InfoLabe2", OBJPROP_TEXT, infoText1); // النص المعروض
+   ObjectSetInteger(0, "InfoLabe2", OBJPROP_FONTSIZE, 12); // حجم الخط
+
+//----------------------------------------------------------------------------------------
+
+   double equity = AccountEquity(); // الحصول على رأس المال
+
+// حذف الرسالة السابقة
+   ObjectDelete("InfoLabe3");
+
+// إنشاء النص لعرض المعلومات
+   string infoText2 = "Equity: " + DoubleToString(equity, 1);
+
+// إنشاء الكائن النصي لعرض المعلومات
+   ObjectCreate(0, "InfoLabe3", OBJ_LABEL, 0, 0, 0);
+   ObjectSetInteger(0, "InfoLabe3", OBJPROP_CORNER, CORNER_LEFT_LOWER);
+   ObjectSetInteger(0, "InfoLabe3", OBJPROP_XDISTANCE, 10); // المسافة من الحافة اليسرى
+   ObjectSetInteger(0, "InfoLabe3", OBJPROP_YDISTANCE, 95); // المسافة من الحافة السفلية
+   ObjectSetInteger(0, "InfoLabe3", OBJPROP_COLOR, clrWhite); // لون النص
+   ObjectSetString(0, "InfoLabe3", OBJPROP_TEXT, infoText2); // النص المعروض
+   ObjectSetInteger(0, "InfoLabe3", OBJPROP_FONTSIZE, 12); // حجم الخط
+
+//-------------------------------------------------------------------------------------------
+
+
+   MaxDrawdown = CalculateMaxDrawdown(); // حساب أقصى سحب
+
+// حذف الرسالة السابقة
+   ObjectDelete("InfoLabe4");
+
+// إنشاء النص لعرض المعلومات بشكل رأسي
+   string infoText3 = "Drawdown: " + DoubleToString(MaxDrawdown, 1) + "%";
+
+
+// إنشاء الكائن النصي لعرض المعلومات
+   ObjectCreate(0, "InfoLabe4", OBJ_LABEL, 0, 0, 0);
+   ObjectSetInteger(0, "InfoLabe4", OBJPROP_CORNER, CORNER_LEFT_LOWER);
+   ObjectSetInteger(0, "InfoLabe4", OBJPROP_XDISTANCE, 10); // المسافة من الحافة اليسرى
+   ObjectSetInteger(0, "InfoLabe4", OBJPROP_YDISTANCE, 65); // المسافة من الحافة السفلية
+   ObjectSetInteger(0, "InfoLabe4", OBJPROP_COLOR, clrWhite); // لون النص
+   ObjectSetString(0, "InfoLabe4", OBJPROP_TEXT, infoText3); // النص المعروض
+   ObjectSetInteger(0, "InfoLabe4", OBJPROP_FONTSIZE, 12); // حجم الخط
+
+
+//---------------------------------------------------------------------------------
+
+
+// إنشاء النص لعرض المعلومات بشكل رأسي
+   string infoText4 = "Initial Balance  : " + DoubleToString(START_BALANCE, 1) ;
+
+
+// إنشاء الكائن النصي لعرض المعلومات
+   ObjectCreate(0, "START_BALANCE", OBJ_LABEL, 0, 0, 0);
+   ObjectSetInteger(0, "START_BALANCE", OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, "START_BALANCE", OBJPROP_XDISTANCE, 10); // المسافة من الحافة اليسرى
+   ObjectSetInteger(0, "START_BALANCE", OBJPROP_YDISTANCE, 95); // المسافة من الحافة السفلية
+   ObjectSetInteger(0, "START_BALANCE", OBJPROP_COLOR, clrWhite); // لون النص
+   ObjectSetString(0, "START_BALANCE", OBJPROP_TEXT, infoText4); // النص المعروض
+   ObjectSetInteger(0, "START_BALANCE", OBJPROP_FONTSIZE, 12); // حجم الخط
+
+//---------------------------------------------------------------------------------
+   /*
+   // Check if the start balance is zero before calculating the profit percentage
+      if(START_BALANCE != 0)
+        {
+         double equity_ = AccountEquity();
+         double Profit_ = equity_ - START_BALANCE;
+         double Profit_in_p_ = (Profit_ / START_BALANCE)* 100;
+        }
+   // حذف الرسالة السابقة
+      ObjectDelete("InfoLabe5");
+
+   // إنشاء النص لعرض المعلومات بشكل رأسي
+      string infoText5 = "Profit : " + DoubleToString(Profit_in_p_, 1) + " %" ;
+
+
+   // إنشاء الكائن النصي لعرض المعلومات
+      ObjectCreate(0, "InfoLabe5", OBJ_LABEL, 0, 0, 0);
+      ObjectSetInteger(0, "InfoLabe5", OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetInteger(0, "InfoLabe5", OBJPROP_XDISTANCE, 10); // المسافة من الحافة اليسرى
+      ObjectSetInteger(0, "InfoLabe5", OBJPROP_YDISTANCE, 125); // المسافة من الحافة السفلية
+      ObjectSetInteger(0, "InfoLabe5", OBJPROP_COLOR, clrWhite); // لون النص
+      ObjectSetString(0, "InfoLabe5", OBJPROP_TEXT, infoText5); // النص المعروض
+      ObjectSetInteger(0, "InfoLabe5", OBJPROP_FONTSIZE, 12); // حجم الخط
+   */
+//-----------------------------------------------------------------------------------
+
+// حذف الرسالة السابقة
+   ObjectDelete("InfoLabe6");
+
+// إنشاء النص لعرض المعلومات بشكل رأسي
+   string infoText6 = "___________________________________"   ;
+
+
+// إنشاء الكائن النصي لعرض المعلومات
+   ObjectCreate(0, "InfoLabe6", OBJ_LABEL, 0, 0, 0);
+   ObjectSetInteger(0, "InfoLabe6", OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, "InfoLabe6", OBJPROP_XDISTANCE, 10); // المسافة من الحافة اليسرى
+   ObjectSetInteger(0, "InfoLabe6", OBJPROP_YDISTANCE, 135); // المسافة من الحافة السفلية
+   ObjectSetInteger(0, "InfoLabe6", OBJPROP_COLOR, clrWhite); // لون النص
+   ObjectSetString(0, "InfoLabe6", OBJPROP_TEXT, infoText6); // النص المعروض
+   ObjectSetInteger(0, "InfoLabe6", OBJPROP_FONTSIZE, 12); // حجم الخط
+
+
+//-------------------------------------------------------------------------------------
+
+
+   string ALERT_TIME_ = "EA is off ";
+
+   if((TimeHour(TimeCurrent()) < stop_in_h))
+      if((TimeHour(TimeCurrent()) >= start_in_h))
+        {
+         ALERT_TIME_ = "EA is ON ";
+        }
+
+
+
+// حذف الرسالة السابقة
+   ObjectDelete("ALERT_TIME");
+// إنشاء النص لعرض المعلومات بشكل رأسي
+   string infoText7 = ALERT_TIME_   ;
+
+
+// إنشاء الكائن النصي لعرض المعلومات
+   ObjectCreate(0, "ALERT_TIME", OBJ_LABEL, 0, 0, 0);
+   ObjectSetInteger(0, "ALERT_TIME", OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, "ALERT_TIME", OBJPROP_XDISTANCE, 10); // المسافة من الحافة اليسرى
+   ObjectSetInteger(0, "ALERT_TIME", OBJPROP_YDISTANCE, 165); // المسافة من الحافة السفلية
+   ObjectSetInteger(0, "ALERT_TIME", OBJPROP_COLOR, clrWhite); // لون النص
+   ObjectSetString(0, "ALERT_TIME", OBJPROP_TEXT, infoText7); // النص المعروض
+   ObjectSetInteger(0, "ALERT_TIME", OBJPROP_FONTSIZE, 14); // حجم الخط
+
+
+  }
+
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+
+
+
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void st()
+  {
+
+   double lossPoints = 0;
+
+// Check if there is any open trade
+   if(OrdersTotal() > 0)
+     {
+      for(int i = 0; i < OrdersTotal(); i++)
+        {
+         // Select the current order
+         if(OrderSelect(i, SELECT_BY_POS, MODE_TRADES))
+           {
+            // Check if the order is open
+            if(OrderType() == OP_BUY || OrderType() == OP_SELL)
+              {
+               if(OrderType() == OP_BUY)
+                 {
+                  // Calculate loss points for buy order
+                  lossPoints = OrderOpenPrice() - Bid;
+                 }
+               else
+                  if(OrderType() == OP_SELL)
+                    {
+                     // Calculate loss points for sell order
+                     lossPoints = Ask - OrderOpenPrice();
+                    }
+
+               // Convert the loss from price to points
+               lossPoints = lossPoints / Point;
+               Print(lossPoints);
+
+              }
+           }
+        }
+     }
+
+   if((TimeHour(TimeCurrent()) < stop_in_h))
+      if((TimeHour(TimeCurrent()) >= start_in_h))
+        {
+
+         //------------------------------------------------------------
+         if(OrdersTotal() == 0)
+           {
+            // لا توجد صفقات مفتوحة، افتح صفقة جديدة
+            OrderSend(Symbol(), OP_SELL, LotSize, Bid, 3, Bid + StopLoss * Point, Bid - TakeProfit  * Point, 0, 0, 0, clrRed);
+           }
+         startingLot = LotSize;
+         currentLot = LotSize;
+        }
+
+
+// يوجد صفقة مفتوحة، تحقق من حالتها
+   for(int ii = 0; ii < OrdersTotal(); ii++)
+     {
+      if(OrderSelect(ii, SELECT_BY_POS, MODE_TRADES))
+        {
+
+         if( lossPoints >= 60)
+
+           {
+           
+            double newLotSize = 0.02 + (currentLot * 2) ;
+
+            if(OrderType() == OP_BUY)
+              {
+               // إذا كانت الصفقة الحالية شراء، افتح صفقة بيع
+               OrderSend(Symbol(), OP_SELL, newLotSize, Bid, 3, Bid + StopLoss * Point, Bid - TakeProfit  * Point, 0, 0, 0, clrRed);
+              }
+
+               if(OrderType() == OP_SELL)
+                 {
+                  // إذا كانت الصفقة الحالية بيع، افتح صفقة شراء
+                  OrderSend(Symbol(), OP_BUY, newLotSize, Ask, 3, Ask-StopLoss*Point, Ask+TakeProfit*Point, 0, 0, 0, Blue);
+                 }
+
+            currentLot = newLotSize;
+
+
+           }
+        }
+     }
+  }
+
+
+
+
+
+
+
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void OnTick()
+  {
+
+
+
+// when it goes up
+   if(Close[2] < Close[1])
+     {
+      // set the body color for bull candles
+      ChartSetInteger(NULL, CHART_COLOR_CANDLE_BULL, clrWhiteSmoke);
+
+      // set the body color for bear candles
+      ChartSetInteger(NULL, CHART_COLOR_CANDLE_BEAR, clrRed);
+
+      ChartSetInteger(NULL, CHART_COLOR_CHART_LINE, clrRed);
+      ChartSetInteger(NULL, CHART_COLOR_VOLUME, clrRed);
+      ChartSetInteger(NULL, CHART_COLOR_ASK, clrRed);
+      ChartSetInteger(NULL, CHART_COLOR_BID, clrRed);
+
+      // set the outer color for bull candles
+      ChartSetInteger(NULL, CHART_COLOR_CHART_UP, clrWhite);
+
+      // set the outer color for bear candles
+      ChartSetInteger(NULL, CHART_COLOR_CHART_DOWN, clrRed);
+
+      // set the candle type to bars
+      ChartSetInteger(NULL, CHART_MODE, CHART_CANDLES);
+
+      // set the grid to visible
+      ChartSetInteger(NULL, CHART_SHOW_GRID, false);
+
+      // set the foreground color for data
+      ChartSetInteger(NULL, CHART_COLOR_FOREGROUND, clrRed);
+
+      // set the background color
+      ChartSetInteger(NULL, CHART_COLOR_BACKGROUND, clrBlack);
+
+     }
+
+
+
+//+------------------------------------------------------------------+
+//|   تحديث الخطوط عند بدء شمعة جديدة                                                                |
+//+------------------------------------------------------------------+
+   if(IsNewBar())
+     {
+      double currentClose = Close[0];
+      double lastHigh = iHigh(Symbol(), PERIOD_CURRENT, 0);
+      double lastLow = iLow(Symbol(), PERIOD_CURRENT, 0);
+
+      ObjectMove(0, "HorizontalLine", 0, Time[0], currentClose);
+      ObjectMove(0, "VerticalLine", 0, Time[0], lastHigh - lastLow);
+     }
+
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+   st();
+   if(graphic == true)
+     {
+      G();
+     }
+
+   if(summary_box == true)
+     {
+      DrawTradeBoxes();
+     }
+
+
+
+//+------------------------------------------------------------------+
+  }
+//+------------------------------------------------------------------+
