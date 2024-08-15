@@ -1,0 +1,435 @@
+//+------------------------------------------------------------------+
+//|                                                      ProjectName |
+//|                                      Copyright 2018, CompanyName |
+//|                                       http://www.companyname.net |
+//+------------------------------------------------------------------+
+//  you need to allow connect for http://calendar.fxstreet.com/
+
+#property strict
+//
+input string nf = "==========  News Filter  ==========";       // ==========  News Filter  ==========
+input bool NewsFilter = true;                                  // News filter On
+input bool CloseBeforeNews = true;                             // Close all positions before news
+input bool NewsImpLow = false;                                  // Low importance news
+input bool NewsImpMed = false;                                  // Medium importance news
+input bool NewsImpHigh = true;                                 // High importance news
+input int StopBeforeNews = 60;                                 // Stop before news in minutes
+input int StartAfterNews = 60;                                 // Start after news in minutes
+//input string Currencies_Check = "USD,EUR,CAD,AUD,NZD,GBP";     // Currencies
+input string Currencies_Check = "USD,EUR,GBP";     // Currencies
+input bool Check_Specific_News = false;                        // Check specific news
+input string Specific_News_Text = "employment";                // Specific news contains
+input bool DrawsNewsChart = true;                              // Shows news on the chart
+input int X = -100;                                              // News X-Axis position on the chart
+input int Y = 400;                                             // News Y-Axis position on the chart
+input string News_Font = "Arial";                              // Font
+input color Font_Color = clrYellow;                            // Color
+input int Font_Size = 9;                                      // Font size
+input bool DrawsNewsLines = true;                              // Draws lines at news
+input color Line_Color = clrRed;                               // Line color
+input ENUM_LINE_STYLE Line_Style = STYLE_DOT;                  // Line style
+input int Line_Width = 1;                                      // Line width
+//
+struct sNews
+  {
+   datetime          dTime;
+   string            time;
+   string            currency;
+   string            importance;
+   string            news;
+   string            Actual;
+   string            forecast;
+   string            previus;
+  };
+string Language = "en-US";
+sNews NewsTable[], Heads;
+datetime date;
+int TimeCorrection;
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+int OnInit()
+  {
+   NewsTimer(true);
+   return(INIT_SUCCEEDED);
+  }
+//+------------------------------------------------------------------+
+//| Expert deinitialization function                                 |
+//+------------------------------------------------------------------+
+void OnDeinit(const int reason)
+  {
+   ObjectsDeleteAll(0, "nwsea", -1, -1);
+   if(MQLInfoInteger(MQL_TESTER) == 0)
+      ObjectsDeleteAll(0, "nwslea", -1, -1);
+  }
+
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+bool NewsTimer(bool nb)
+  {
+   if(nb)
+     {
+      ObjectsDeleteAll(0, "nwsea", -1, -1);
+      ObjectsDeleteAll(0, "nwslea", -1, -1);
+      if(NewsFilter == true && ReadNews(NewsTable) && ArraySize(NewsTable) > 0)
+         DrawNews(NewsTable);
+      else
+         return false;
+     }
+   datetime time = TimeCurrent();
+   TimeCorrection = (-TimeGMTOffset());
+//---
+   for(int i = 0; i < ArraySize(NewsTable); i++)
+     {
+      datetime news_time = NewsTable[i].dTime + TimeCorrection;
+      bool Importance_Check = false;
+      if((!NewsImpLow && NewsTable[i].importance == "*") ||
+         (!NewsImpMed && NewsTable[i].importance == "**") ||
+         (!NewsImpHigh && NewsTable[i].importance == "***"))
+         Importance_Check = true;
+      if(Importance_Check || StringFind(Currencies_Check, NewsTable[i].currency, 0) == -1 || (Check_Specific_News  && (StringFind(NewsTable[i].news, Specific_News_Text) == -1)))
+         continue;
+      if((news_time <= time && (news_time + (StartAfterNews * 60)) >= time) ||
+         (news_time >= time && (news_time - (StopBeforeNews * 60)) <= time))
+        {
+         Comment("News Time...");
+         return false;
+        }
+      else
+        {
+         Comment("No News");
+         return false;
+        }
+     }
+   return false;
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void DelRow(sNews &l_a_news[], int row)
+  {
+   int size = ArraySize(l_a_news) - 1;
+   for(int i = row; i < size; i++)
+     {
+      l_a_news[i].Actual = l_a_news[i + 1].Actual;
+      l_a_news[i].currency = l_a_news[i + 1].currency;
+      l_a_news[i].dTime = l_a_news[i + 1].dTime;
+      l_a_news[i].forecast = l_a_news[i + 1].forecast;
+      l_a_news[i].importance = l_a_news[i + 1].importance;
+      l_a_news[i].news = l_a_news[i + 1].news;
+      l_a_news[i].previus = l_a_news[i + 1].previus;
+      l_a_news[i].time = l_a_news[i + 1].time;
+     }
+   ArrayResize(l_a_news, size);
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+bool ReadNews(sNews &l_NewsTable[])
+  {
+   string cookie = NULL, referer = NULL, headers;
+   char post[], result[];
+   string tmpStr = "";
+   string st_date = TimeToString(TimeCurrent(), TIME_DATE), end_date = TimeToString((TimeCurrent() + (datetime)(7 * 24 * 60 * 60)), TIME_DATE);
+   StringReplace(st_date, ".", "");
+   StringReplace(end_date, ".", "");
+   string url = "http://calendar.fxstreet.com/EventDateWidget/GetMini?culture=" + Language + "&view=range&start=" + st_date + "&end=" + end_date + "&timezone=UTC" + "&columns=date%2Ctime%2Ccountry%2Ccountrycurrency%2Cevent%2Cconsensus%2Cprevious%2Cvolatility%2Cactual&showcountryname=false&showcurrencyname=true&isfree=true&_=1455009216444";
+   ResetLastError();
+   WebRequest("GET", url, cookie, referer, 10000, post, sizeof(post), result, headers);
+   if(ArraySize(result) <= 0)
+     {
+      int er = GetLastError();
+      ResetLastError();
+      Print("ERROR_TXT IN WebRequest");
+      if(er == 4060)
+         MessageBox("YOU MUST ADD THE ADDRESS '" + "http://calendar.fxstreet.com/" + "' IN THE LIST OF ALLOWED URL IN THE TAB 'ADVISERS'", "ERROR_TXT", MB_ICONINFORMATION);
+      return false;
+     }
+   tmpStr = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
+   int handl = FileOpen("News.txt", FILE_WRITE | FILE_TXT);
+   FileWrite(handl, tmpStr);
+   FileFlush(handl);
+   FileClose(handl);
+   StringReplace(tmpStr, "&#39;", "'");
+   StringReplace(tmpStr, "&#163;", "");
+   StringReplace(tmpStr, "&#165;", "");
+   StringReplace(tmpStr, "&amp;", "&");
+   int st = StringFind(tmpStr, "fxst-thevent", 0);
+   st = StringFind(tmpStr, ">", st) + 1;
+   int end = StringFind(tmpStr, "</th>", st);
+   Heads.news = (st < end ? StringSubstr(tmpStr, st, end - st) : "");
+   st = StringFind(tmpStr, "fxst-thvolatility", 0);
+   st = StringFind(tmpStr, ">", st) + 1;
+   end = StringFind(tmpStr, "</th>", st);
+   Heads.importance = (st < end ? StringSubstr(tmpStr, st, fmin(end - st, 8)) : "");
+   st = StringFind(tmpStr, "fxst-thactual", 0);
+   st = StringFind(tmpStr, ">", st) + 1;
+   end = StringFind(tmpStr, "</th>", st);
+   Heads.Actual = (st < end ? StringSubstr(tmpStr, st, fmin(end - st, 8)) : "");
+   st = StringFind(tmpStr, "fxst-thconsensus", 0);
+   st = StringFind(tmpStr, ">", st) + 1;
+   end = StringFind(tmpStr, "</th>", st);
+   Heads.forecast = (st < end ? StringSubstr(tmpStr, st, fmin(end - st, 8)) : "");
+   st = StringFind(tmpStr, "fxst-thprevious", 0);
+   st = StringFind(tmpStr, ">", st) + 1;
+   end = StringFind(tmpStr, "</th>", st);
+   Heads.previus = (st < end ? StringSubstr(tmpStr, st, end - st) : "");
+   Heads.currency = "";
+   Heads.dTime = 0;
+   Heads.time = "";
+   int startLoad = StringFind(tmpStr, "<tbody>", 0) + 7;
+   int endLoad = StringFind(tmpStr, "</tbody>", startLoad);
+   if(startLoad >= 0 && endLoad > startLoad)
+     {
+      tmpStr = StringSubstr(tmpStr, startLoad, endLoad - startLoad);
+      while(StringReplace(tmpStr, "  ", " "));
+     }
+   else
+      return false;
+   int begin = -1;
+   do
+     {
+      begin = StringFind(tmpStr, "<span", 0);
+      if(begin >= 0)
+        {
+         end = StringFind(tmpStr, "</span>", begin) + 7;
+         tmpStr = StringSubstr(tmpStr, 0, begin) + StringSubstr(tmpStr, end);
+        }
+     }
+   while(begin >= 0);
+   StringReplace(tmpStr, "<strong>", NULL);
+   StringReplace(tmpStr, "</strong>", NULL);
+   int BackShift = 0;
+   string arNews[];
+   for(uchar tr = 1; tr < 255; tr++)
+     {
+      if(StringFind(tmpStr, CharToString(tr), 0) > 0)
+         continue;
+      int K = StringReplace(tmpStr, "</tr>", CharToString(tr));
+      //ArrayResize(arNews,StringReplace(tmpStr,"</tr>",CharToString(tr)));
+      K = StringSplit(tmpStr, tr, arNews);
+      ArrayResize(l_NewsTable, K);
+      for(int td = 0; td < ArraySize(arNews); td++)
+        {
+         st = StringFind(arNews[td], "fxst-td-date", 0);
+         if(st > 0)
+           {
+            st = StringFind(arNews[td], ">", st) + 1;
+            end = StringFind(arNews[td], "</td>", st) - 1;
+            int d = (int)StringToInteger(StringSubstr(arNews[td], end - 4, end - st));
+            MqlDateTime time;
+            TimeCurrent(time);
+            if(d < (time.day - 5))
+              {
+               if(time.mon == 12)
+                 {
+                  time.mon = 1;
+                  time.year++;
+                 }
+               else
+                 {
+                  time.mon++;
+                 }
+              }
+            time.day = d;
+            time.min = 0;
+            time.hour = 0;
+            time.sec = 0;
+            date = StructToTime(time);
+            BackShift++;
+            continue;
+           }
+         st = StringFind(arNews[td], "fxst-evenRow", 0);
+         if(st < 0)
+           {
+            BackShift++;
+            continue;
+           }
+         int st1 = StringFind(arNews[td], "fxst-td-time", st);
+         st1 = StringFind(arNews[td], ">", st1) + 1;
+         end = StringFind(arNews[td], "</td>", st1);
+         l_NewsTable[td - BackShift].time = StringSubstr(arNews[td], st1, end - st1);
+         if(StringFind(l_NewsTable[td - BackShift].time, ":") > 0)
+           {
+            l_NewsTable[td - BackShift].dTime = StringToTime(TimeToString(date, TIME_DATE) + " " + StringSubstr(arNews[td], st1, end - st1));
+           }
+         else
+           {
+            l_NewsTable[td - BackShift].dTime = date;
+           }
+         st1 = StringFind(arNews[td], "fxst-td-currency", st);
+         st1 = StringFind(arNews[td], ">", st1) + 1;
+         end = StringFind(arNews[td], "</td>", st1);
+         l_NewsTable[td - BackShift].currency = (st1 < end ? StringSubstr(arNews[td], st1, end - st1) : "");
+         st1 = StringFind(arNews[td], "fxst-i-vol", st);
+         st1 = StringFind(arNews[td], ">", st1) + 1;
+         end = StringFind(arNews[td], "</td>", st1);
+         StringInit(l_NewsTable[td - BackShift].importance, (int)StringToInteger(StringSubstr(arNews[td], st1, end - st1)), '*');
+         st1 = StringFind(arNews[td], "fxst-td-event", st);
+         int st2 = StringFind(arNews[td], "fxst-eventurl", st1);
+         st1 = StringFind(arNews[td], ">", fmax(st1, st2)) + 1;
+         end = StringFind(arNews[td], "</td>", st1);
+         int end1 = StringFind(arNews[td], "</a>", st1);
+         l_NewsTable[td - BackShift].news = StringSubstr(arNews[td], st1, (end1 > 0 ? fmin(end, end1) : end) - st1);
+         st1 = StringFind(arNews[td], "fxst-td-act", st);
+         st1 = StringFind(arNews[td], ">", st1) + 1;
+         end = StringFind(arNews[td], "</td>", st1);
+         l_NewsTable[td - BackShift].Actual = (end > st1 ? StringSubstr(arNews[td], st1, end - st1) : "");
+         st1 = StringFind(arNews[td], "fxst-td-cons", st);
+         st1 = StringFind(arNews[td], ">", st1) + 1;
+         end = StringFind(arNews[td], "</td>", st1);
+         l_NewsTable[td - BackShift].forecast = (end > st1 ? StringSubstr(arNews[td], st1, end - st1) : "");
+         st1 = StringFind(arNews[td], "fxst-td-prev", st);
+         st1 = StringFind(arNews[td], ">", st1) + 1;
+         end = StringFind(arNews[td], "</td>", st1);
+         l_NewsTable[td - BackShift].previus = (end > st1 ? StringSubstr(arNews[td], st1, end - st1) : "");
+        }
+      break;
+     }
+   ArrayResize(l_NewsTable, (ArraySize(l_NewsTable) - BackShift));
+   return(true);
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+void DrawNews(sNews &l_a_news[])
+  {
+   if(DrawsNewsLines || DrawsNewsChart)
+     {
+      if(NewsFilter == false)
+         return;
+      for(int i = ArraySize(l_a_news) - 1; i >= 0; i--)
+        {
+         StringReplace(l_a_news[i].currency, " ", "");
+         int Currency_check_counter = 0;
+         datetime t1 = (l_a_news[i].dTime + (datetime)(StartAfterNews * 60));
+         datetime t2 = ((TimeCurrent() - (datetime)TimeCorrection));
+         if(StringFind(Currencies_Check, l_a_news[i].currency) == -1 || t1 < t2 || (Check_Specific_News  && (StringFind(l_a_news[i].news, Specific_News_Text) == -1)))
+           {
+            DelRow(l_a_news, i);
+            continue;
+           }
+         if((!NewsImpLow && l_a_news[i].importance == "*") ||
+            (!NewsImpMed && l_a_news[i].importance == "**") ||
+            (!NewsImpHigh && l_a_news[i].importance == "***"))
+           {
+            DelRow(l_a_news, i);
+            continue;
+           }
+         string oName = ("nwslea " + l_a_news[i].currency + " " + l_a_news[i].importance + " " + l_a_news[i].news);
+         if(DrawsNewsLines)
+           {
+            if(ObjectFind(0, oName) < 0)
+              {
+               ObjectCreate(0, oName, OBJ_VLINE, 0, l_a_news[i].dTime + TimeCorrection, 0);
+               ObjectSetInteger(0, oName, OBJPROP_SELECTABLE, false);
+               ObjectSetInteger(0, oName, OBJPROP_SELECTED, false);
+               ObjectSetInteger(0, oName, OBJPROP_HIDDEN, true);
+               ObjectSetInteger(0, oName, OBJPROP_BACK, false);
+               ObjectSetInteger(0, oName, OBJPROP_COLOR, Line_Color);
+               ObjectSetInteger(0, oName, OBJPROP_STYLE, Line_Style);
+               ObjectSetInteger(0, oName, OBJPROP_WIDTH, Line_Width);
+              }
+           }
+        }
+      string oName;
+      int K = 0, Z = 0;
+      if(DrawsNewsChart)
+        {
+         for(int l = 1; l <= 9 && Z < ArraySize(l_a_news); l++)
+           {
+            for(K = Z; K < ArraySize(l_a_news); K++)
+               if(l_a_news[K].currency != "")
+                  break;
+            Z = K + 1;
+            oName = "nwsea_PANEL_NEWS_N" + (string)l;
+            if(ObjectFind(0, oName) < 0)
+               ObjectLabel(0, oName, 0, X + 110, Y - (int)(18 * (l + 5)), CORNER_LEFT_LOWER, ((TimeToString(l_a_news[K].dTime + TimeCorrection, TIME_DATE | TIME_MINUTES) + " " + l_a_news[K].currency + " " + l_a_news[K].importance + " " + l_a_news[K].news)), News_Font, Font_Size, Font_Color, 0, ANCHOR_LEFT_UPPER, false, false, true, 0);
+           }
+        }
+      return;
+     }
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+bool ObjectLabel(const long              CHART_ID = 0,
+                 const string            oName        = "",
+                 const int               SUB_WINDOW  = 0,
+                 const int               X_Axis      = 0,
+                 const int               Y_Axis      = 0,
+                 const ENUM_BASE_CORNER  CORNER      = CORNER_LEFT_LOWER,
+                 const string            TEXT        = "",
+                 const string            FONT        = "",
+                 const int               FONT_SIZE   = 12,
+                 const color             CLR         = color("255,0,0"),
+                 const double            ANGLE       = 0.0,
+                 const ENUM_ANCHOR_POINT ANCHOR      = ANCHOR_LEFT_LOWER,
+                 const bool              BACK        = false,
+                 const bool              SELECTION   = false,
+                 const bool              HIDDEN      = true,
+                 const long              ZORDER      = 0,
+                 string                  TOOLTIP     = "\n")
+  {
+   ResetLastError();
+   if(ObjectFind(0, oName) < 0)
+     {
+      ObjectCreate(CHART_ID, oName, OBJ_LABEL, SUB_WINDOW, 0, 0);
+      ObjectSetInteger(CHART_ID, oName, OBJPROP_XDISTANCE, X_Axis);
+      ObjectSetInteger(CHART_ID, oName, OBJPROP_YDISTANCE, Y_Axis);
+      ObjectSetInteger(CHART_ID, oName, OBJPROP_CORNER, CORNER);
+      ObjectSetString(CHART_ID, oName, OBJPROP_TEXT, TEXT);
+      ObjectSetString(CHART_ID, oName, OBJPROP_FONT, FONT);
+      ObjectSetInteger(CHART_ID, oName, OBJPROP_FONTSIZE, FONT_SIZE);
+      ObjectSetDouble(CHART_ID, oName, OBJPROP_ANGLE, ANGLE);
+      ObjectSetInteger(CHART_ID, oName, OBJPROP_ANCHOR, ANCHOR);
+      ObjectSetInteger(CHART_ID, oName, OBJPROP_COLOR, CLR);
+      ObjectSetInteger(CHART_ID, oName, OBJPROP_BACK, BACK);
+      ObjectSetInteger(CHART_ID, oName, OBJPROP_SELECTABLE, SELECTION);
+      ObjectSetInteger(CHART_ID, oName, OBJPROP_SELECTED, SELECTION);
+      ObjectSetInteger(CHART_ID, oName, OBJPROP_HIDDEN, HIDDEN);
+      ObjectSetInteger(CHART_ID, oName, OBJPROP_ZORDER, ZORDER);
+      ObjectSetString(CHART_ID, oName, OBJPROP_TOOLTIP, TOOLTIP);
+     }
+   else
+     {
+      ObjectSetInteger(CHART_ID, oName, OBJPROP_COLOR, CLR);
+      ObjectSetString(CHART_ID, oName, OBJPROP_TEXT, TEXT);
+      ObjectSetInteger(CHART_ID, oName, OBJPROP_XDISTANCE, X);
+      ObjectSetInteger(CHART_ID, oName, OBJPROP_YDISTANCE, Y);
+     }
+   return(true);
+   ChartRedraw();
+  }
+//+------------------------------------------------------------------+
+//| Expert tick function                                             |
+//+------------------------------------------------------------------+
+void OnTick()
+  {
+   bool newBar = IsNewBar();
+   if(NewsFilter)
+     {
+      if(NewsTimer(newBar))
+        {
+         if(CloseBeforeNews)
+            // insert here Your close all func
+            return;
+        }
+     }
+  }
+//+------------------------------------------------------------------+
+//|                                                                  |
+//+------------------------------------------------------------------+
+bool IsNewBar()
+  {
+   static datetime lastbar;
+   datetime curbar = (datetime)SeriesInfoInteger(_Symbol, _Period, SERIES_LASTBAR_DATE);
+   if(lastbar != curbar)
+     {
+      lastbar = curbar;
+      return true;
+     }
+   return false;
+  }
+//+------------------------------------------------------------------+
